@@ -45,7 +45,7 @@ func printTerms() {
 	}
 	for _, t := range terms {
 		fmt.Printf("%s(%s)\n[%s]\n", t.Expression, t.Reading, t.Dict)
-		fmt.Println(strings.Join(t.Glossaries, "\n\n"))
+		fmt.Println(strings.TrimSuffix(strings.Join(t.Glossaries, "\n"), "\n") + "\n")
 	}
 }
 
