@@ -4,18 +4,22 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
-	"github.com/masakichi/tango/dict"
-	"github.com/masakichi/tango/utils"
-	_ "github.com/mattn/go-sqlite3"
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+
+	"github.com/masakichi/tango/dict"
+	"github.com/masakichi/tango/utils"
+	_ "modernc.org/sqlite"
 )
 
-const (
-	appName = "tango"
-	version = "1.0.0"
+var (
+	appName   = "tango"
+	version   string
+	gitCommit string
+	buildDate string
 )
 
 var (
@@ -27,7 +31,7 @@ func initDatabase() {
 	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
 		os.MkdirAll(dataDir, os.ModePerm)
 	}
-	db, err := sql.Open("sqlite3", databasePath)
+	db, err := sql.Open("sqlite", databasePath)
 	if err != nil {
 		log.Fatal(err)
 	} else {
@@ -73,6 +77,7 @@ func main() {
 
 	listFlag := flag.Bool("list", false, "list all dictionaries")
 	importFlag := flag.String("import", "", "import yomichan's dictionary zip file")
+	versionFlag := flag.Bool("version", false, "print tango app version")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "%s: A CLI Japanese Dictionary Tool\n", appName)
 		fmt.Fprintf(os.Stderr, "Usage: %s %s\n\n", os.Args[0], "単語")
@@ -89,5 +94,18 @@ func main() {
 	if *listFlag {
 		printDicts()
 		return
+	}
+
+	if *versionFlag {
+		if gitCommit != "" {
+			version += "-" + gitCommit
+		}
+		if buildDate == "" {
+			buildDate = "unknown"
+		}
+		osArch := runtime.GOOS + "/" + runtime.GOARCH
+		versionString := fmt.Sprintf("%s %s %s BuildDate=%s",
+			appName, version, osArch, buildDate)
+		fmt.Println(versionString)
 	}
 }

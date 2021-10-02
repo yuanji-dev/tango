@@ -1,0 +1,36 @@
+project_name: tango 
+before:
+  hooks:
+    - go mod tidy
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    ldflags:
+      - -s -w -X main.version=v{{ .Version }} -X main.gitCommit={{ .ShortCommit }} -X main.buildDate={{ .Date }}
+archives:
+  - replacements:
+      darwin: Darwin
+      linux: Linux
+      windows: Windows
+      386: i386
+      amd64: x86_64
+brews:
+  - tap:
+      owner: masakichi
+      name: homebrew-tap
+    folder: Formula
+    license: "MIT"
+    homepage: "https://github.com/masakichi/tango"
+    description: "Tango(単語) is a local command-line Japanese dictionary tool using yomichan's dictionary files."
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  name_template: "{{ incpatch .Version }}-dev"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
