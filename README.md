@@ -6,14 +6,25 @@ Tango(単語) is a local command-line Japanese dictionary tool using yomichan's 
     <img width="1628" alt="tango 単語 preview" src="https://user-images.githubusercontent.com/1995921/62043969-ca1a1680-b23c-11e9-91da-5ac55123d831.png">
 </p>
 
-
 ## Install
 
+If you use Homebrew you can:
 
-```shell
-go get github.com/masakichi/tango
+```bash
+brew install masakichi/tap/tango
 ```
 
+For Go 1.16+
+
+```bash
+go install github.com/masakichi/tango@latest
+```
+
+Or use `go get`
+
+```bash
+GO111MODULE=on go get github.com/masakichi/tango
+```
 
 ## Configuration
 
@@ -36,4 +47,6 @@ Other Commands of tango:
     	import yomichan's dictionary zip file
   -list
     	list all dictionaries
+  -version
+    	print tango app version
 ```
