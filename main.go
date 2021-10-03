@@ -17,7 +17,7 @@ import (
 
 var (
 	appName   = "tango"
-	version   string
+	version   = "1.2.0-dev"
 	gitCommit string
 	buildDate string
 )
@@ -27,53 +27,21 @@ var (
 	databasePath = filepath.Join(dataDir, "tango.db")
 )
 
-func initDatabase() {
+func initDatabase() *sql.DB {
 	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
 		os.MkdirAll(dataDir, os.ModePerm)
 	}
 	db, err := sql.Open("sqlite", databasePath)
 	if err != nil {
 		log.Fatal(err)
-	} else {
-		dict.TangoDB = db
 	}
 	if _, err := os.Stat(databasePath); os.IsNotExist(err) {
-		dict.InitDictDB()
+		dict.InitDictDB(db)
 	}
-}
-
-func printTerms() {
-	terms, err := dict.DefineWord(os.Args[1])
-	if err != nil {
-		log.Fatal(err)
-	}
-	for _, t := range terms {
-		fmt.Printf("%s(%s)\n[%s]\n", t.Expression, t.Reading, t.Dict)
-		fmt.Println(strings.TrimSuffix(strings.Join(t.Glossaries, "\n"), "\n") + "\n")
-	}
-}
-
-func printDicts() {
-	dicts, err := dict.GetAllDicts()
-	if err != nil {
-		log.Fatal(err)
-	}
-	for _, d := range dicts {
-		fmt.Printf("[%d] %s Format: %d, Revision: %s\n", d.ID, d.Title, d.Format, d.Revision)
-	}
+	return db
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		log.Fatal("plz give me a word")
-	}
-
-	initDatabase()
-
-	if !strings.HasPrefix(os.Args[1], "-") {
-		printTerms()
-		return
-	}
 
 	listFlag := flag.Bool("list", false, "list all dictionaries")
 	importFlag := flag.String("import", "", "import yomichan's dictionary zip file")
@@ -84,15 +52,29 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Other Commands of %s:\n", os.Args[0])
 		flag.PrintDefaults()
 	}
+
 	flag.Parse()
 
+	if len(os.Args) < 2 {
+		flag.Usage()
+		return
+	}
+
+	db := initDatabase()
+	defer db.Close()
+
+	if !strings.HasPrefix(os.Args[1], "-") {
+		dict.PrintTerms(db)
+		return
+	}
+
 	if *importFlag != "" {
-		dict.ImportDictDB(*importFlag)
+		dict.ImportDictDB(db, *importFlag)
 		return
 	}
 
 	if *listFlag {
-		printDicts()
+		dict.PrintDicts(db)
 		return
 	}
 

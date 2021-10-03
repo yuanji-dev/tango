@@ -7,10 +7,9 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"os"
 	"strings"
 )
-
-var TangoDB *sql.DB
 
 // https://github.com/FooSoft/yomichan-import/blob/5fe039e5f66ccad397f97a44a9f406a5a68a9438/common.go
 //type dbTerm struct {
@@ -55,14 +54,14 @@ func (t *Term) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func InitDictDB() {
-	TangoDB.Exec(`CREATE TABLE IF NOT EXISTS terms (id INTEGER PRIMARY KEY, expression TEXT, reading TEXT, glossaries TEXT, dict_id INTEGER)`)
-	TangoDB.Exec(`CREATE INDEX IF NOT EXISTS idx_expr ON terms (expression)`)
-	TangoDB.Exec(`CREATE INDEX IF NOT EXISTS idx_read ON terms (reading)`)
-	TangoDB.Exec(`CREATE TABLE IF NOT EXISTS dicts (id INTEGER PRIMARY KEY, title TEXT, format INTEGER, revision TEXT)`)
+func InitDictDB(db *sql.DB) {
+	db.Exec(`CREATE TABLE IF NOT EXISTS terms (id INTEGER PRIMARY KEY, expression TEXT, reading TEXT, glossaries TEXT, dict_id INTEGER)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_expr ON terms (expression)`)
+	db.Exec(`CREATE INDEX IF NOT EXISTS idx_read ON terms (reading)`)
+	db.Exec(`CREATE TABLE IF NOT EXISTS dicts (id INTEGER PRIMARY KEY, title TEXT, format INTEGER, revision TEXT)`)
 }
 
-func ImportDictDB(dictName string) {
+func ImportDictDB(db *sql.DB, dictName string) {
 	r, err := zip.OpenReader(dictName)
 	if err != nil {
 		log.Fatal(err)
@@ -82,13 +81,13 @@ func ImportDictDB(dictName string) {
 	}
 
 	var dictTitle string
-	row := TangoDB.QueryRow(`SELECT title FROM dicts WHERE title = ?`, dict.Title)
+	row := db.QueryRow(`SELECT title FROM dicts WHERE title = ?`, dict.Title)
 	row.Scan(&dictTitle)
 	if dictTitle != "" {
 		log.Fatal("dict already exist")
 	}
 
-	tx, _ := TangoDB.Begin()
+	tx, _ := db.Begin()
 
 	rv, err := tx.Exec(
 		`INSERT INTO dicts (title, format, revision) VALUES (?,?,?)`,
@@ -133,8 +132,8 @@ func ImportDictDB(dictName string) {
 	}
 }
 
-func GetAllDicts() ([]Dict, error) {
-	rows, err := TangoDB.Query(
+func getAllDicts(db *sql.DB) ([]Dict, error) {
+	rows, err := db.Query(
 		`SELECT id, title, format, revision
 		 FROM dicts
 		 ORDER BY id ASC`,
@@ -151,8 +150,8 @@ func GetAllDicts() ([]Dict, error) {
 	return result, nil
 }
 
-func DefineWord(w string) ([]Term, error) {
-	rows, err := TangoDB.Query(
+func defineWord(db *sql.DB, w string) ([]Term, error) {
+	rows, err := db.Query(
 		`SELECT expression, reading, glossaries, d.title
 		 FROM terms t
 		 LEFT JOIN dicts d on t.dict_id = d.id
@@ -171,4 +170,25 @@ func DefineWord(w string) ([]Term, error) {
 		result = append(result, t)
 	}
 	return result, nil
+}
+
+func PrintTerms(db *sql.DB) {
+	terms, err := defineWord(db, os.Args[1])
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, t := range terms {
+		fmt.Printf("%s(%s)\n[%s]\n", t.Expression, t.Reading, t.Dict)
+		fmt.Println(strings.TrimSuffix(strings.Join(t.Glossaries, "\n"), "\n") + "\n")
+	}
+}
+
+func PrintDicts(db *sql.DB) {
+	dicts, err := getAllDicts(db)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, d := range dicts {
+		fmt.Printf("[%d] %s Format: %d, Revision: %s\n", d.ID, d.Title, d.Format, d.Revision)
+	}
 }
