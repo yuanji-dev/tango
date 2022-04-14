@@ -8,8 +8,11 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 )
+
+var db *sql.DB
 
 // https://github.com/FooSoft/yomichan-import/blob/5fe039e5f66ccad397f97a44a9f406a5a68a9438/common.go
 //type dbTerm struct {
@@ -54,14 +57,30 @@ func (t *Term) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func InitDictDB(db *sql.DB) {
+func InitDatabase(dataDir string) error {
+	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
+		os.MkdirAll(dataDir, os.ModePerm)
+	}
+	databasePath := filepath.Join(dataDir, "tango.db")
+	var err error
+	db, err = sql.Open("sqlite", databasePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if _, err := os.Stat(databasePath); os.IsNotExist(err) {
+		initDictDB()
+	}
+	return db.Ping()
+}
+
+func initDictDB() {
 	db.Exec(`CREATE TABLE IF NOT EXISTS terms (id INTEGER PRIMARY KEY, expression TEXT, reading TEXT, glossaries TEXT, dict_id INTEGER)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_expr ON terms (expression)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_read ON terms (reading)`)
 	db.Exec(`CREATE TABLE IF NOT EXISTS dicts (id INTEGER PRIMARY KEY, title TEXT, format INTEGER, revision TEXT)`)
 }
 
-func ImportDictDB(db *sql.DB, dictName string) {
+func ImportDictDB(dictName string) {
 	r, err := zip.OpenReader(dictName)
 	if err != nil {
 		log.Fatal(err)
@@ -132,7 +151,7 @@ func ImportDictDB(db *sql.DB, dictName string) {
 	}
 }
 
-func getAllDicts(db *sql.DB) ([]Dict, error) {
+func AllDicts() ([]Dict, error) {
 	rows, err := db.Query(
 		`SELECT id, title, format, revision
 		 FROM dicts
@@ -150,7 +169,7 @@ func getAllDicts(db *sql.DB) ([]Dict, error) {
 	return result, nil
 }
 
-func defineWord(db *sql.DB, w string) ([]Term, error) {
+func DefineWord(w string) ([]Term, error) {
 	rows, err := db.Query(
 		`SELECT expression, reading, glossaries, d.title
 		 FROM terms t
@@ -164,31 +183,10 @@ func defineWord(db *sql.DB, w string) ([]Term, error) {
 	var result []Term
 	for rows.Next() {
 		var t Term
-		var glossaries string
+		var glossaries []byte
 		rows.Scan(&t.Expression, &t.Reading, &glossaries, &t.Dict)
-		json.Unmarshal([]byte(glossaries), &t.Glossaries)
+		json.Unmarshal(glossaries, &t.Glossaries)
 		result = append(result, t)
 	}
 	return result, nil
-}
-
-func PrintTerms(db *sql.DB) {
-	terms, err := defineWord(db, os.Args[1])
-	if err != nil {
-		log.Fatal(err)
-	}
-	for _, t := range terms {
-		fmt.Printf("%s(%s)\n[%s]\n", t.Expression, t.Reading, t.Dict)
-		fmt.Println(strings.TrimSuffix(strings.Join(t.Glossaries, "\n"), "\n") + "\n")
-	}
-}
-
-func PrintDicts(db *sql.DB) {
-	dicts, err := getAllDicts(db)
-	if err != nil {
-		log.Fatal(err)
-	}
-	for _, d := range dicts {
-		fmt.Printf("[%d] %s Format: %d, Revision: %s\n", d.ID, d.Title, d.Format, d.Revision)
-	}
 }
