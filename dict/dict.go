@@ -14,49 +14,32 @@ import (
 
 var db *sql.DB
 
+// Term is type used for definition of a word
 // https://github.com/FooSoft/yomichan-import/blob/5fe039e5f66ccad397f97a44a9f406a5a68a9438/common.go
-//type dbTerm struct {
-//	Expression     string
-//	Reading        string
-//	DefinitionTags []string
-//	Rules          []string
-//	Score          int
-//	Glossary       []string
-//	Sequence       int
-//	TermTags       []string
-//}
 type Term struct {
-	Expression string
-	Reading    string
-	Glossaries []string
-	Dict       string
+	Expression     string
+	Reading        string
+	DefinitionTags string
+	Rules          string
+	Score          int
+	Glossary       []string
+	Sequence       int
+	TermTags       string
+	Dict           string
 }
 
+type rawTermList [][]interface{}
+
+// Dict stores metadata of a yomichan dictionary
 type Dict struct {
-	ID       int
-	Title    string `json:"title"`
-	Format   int    `json:"format"`
-	Revision string `json:"revision"`
+	ID        int
+	Title     string `json:"title"`
+	Format    int    `json:"format"`
+	Revision  string `json:"revision"`
+	Sequenced bool   `json:"sequenced"`
 }
 
-func (t *Term) UnmarshalJSON(data []byte) error {
-	var v []interface{}
-	if err := json.Unmarshal(data, &v); err != nil {
-		return err
-	}
-	t.Expression = v[0].(string)
-	t.Reading = v[1].(string)
-	//t.Glossaries = v[5].([]string)
-	t.Glossaries = func(gs []interface{}) []string {
-		result := []string{}
-		for _, g := range gs {
-			result = append(result, g.(string))
-		}
-		return result
-	}(v[5].([]interface{}))
-	return nil
-}
-
+// InitDatabase sets up the global db object
 func InitDatabase(dataDir string) error {
 	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
 		os.MkdirAll(dataDir, os.ModePerm)
@@ -74,12 +57,23 @@ func InitDatabase(dataDir string) error {
 }
 
 func initDictDB() {
-	db.Exec(`CREATE TABLE IF NOT EXISTS terms (id INTEGER PRIMARY KEY, expression TEXT, reading TEXT, glossaries TEXT, dict_id INTEGER)`)
+	db.Exec(`CREATE TABLE IF NOT EXISTS terms 
+          (id INTEGER PRIMARY KEY,
+           expression TEXT,
+           reading TEXT,
+           definition_tags TEXT,
+           rules TEXT,
+           score INTEGER,
+           glossary TEXT,
+           sequence INTEGER,
+           term_tags INTEGER,
+           dict_id INTEGER)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_expr ON terms (expression)`)
 	db.Exec(`CREATE INDEX IF NOT EXISTS idx_read ON terms (reading)`)
-	db.Exec(`CREATE TABLE IF NOT EXISTS dicts (id INTEGER PRIMARY KEY, title TEXT, format INTEGER, revision TEXT)`)
+	db.Exec(`CREATE TABLE IF NOT EXISTS dicts (id INTEGER PRIMARY KEY, title TEXT, format INTEGER, revision TEXT, sequenced BOOLEAN)`)
 }
 
+// ImportDictDB import a yomichan zip format dictionary into sqlite database
 func ImportDictDB(dictName string) {
 	r, err := zip.OpenReader(dictName)
 	if err != nil {
@@ -109,15 +103,15 @@ func ImportDictDB(dictName string) {
 	tx, _ := db.Begin()
 
 	rv, err := tx.Exec(
-		`INSERT INTO dicts (title, format, revision) VALUES (?,?,?)`,
-		dict.Title, dict.Format, dict.Revision,
+		`INSERT INTO dicts (title, format, revision, sequenced) VALUES (?,?,?,?)`,
+		dict.Title, dict.Format, dict.Revision, dict.Sequenced,
 	)
 	if err != nil {
 		log.Fatal(err)
 	}
 	dictID, _ := rv.LastInsertId()
 
-	termList := []Term{}
+	termList := rawTermList{}
 	for _, f := range r.File {
 		if !strings.HasPrefix(f.Name, "term_bank_") {
 			continue
@@ -125,18 +119,18 @@ func ImportDictDB(dictName string) {
 		rc, _ := f.Open()
 		content, _ := ioutil.ReadAll(rc)
 
-		var v []Term
+		var v rawTermList
 		json.Unmarshal(content, &v)
 		termList = append(termList, v...)
 		rc.Close()
 	}
 	canCommit := true
 	for _, t := range termList {
-		glossaries, _ := json.Marshal(t.Glossaries)
+		//glossaries, _ := json.Marshal(t.Glossaries)
+		t[5], err = json.Marshal(t[5])
 		_, err := tx.Exec(
-			`INSERT INTO terms (expression, reading, glossaries, dict_id) VALUES (?,?,?,?)`,
-			t.Expression, t.Reading, string(glossaries), dictID,
-		)
+			`INSERT INTO terms (expression, reading, definition_tags, rules, score, glossary, sequence, term_tags, dict_id) VALUES (?,?,?,?,?,json(?),?,?,?)`,
+			append(t, dictID)...)
 		if err != nil {
 			fmt.Println(err)
 			canCommit = false
@@ -151,6 +145,7 @@ func ImportDictDB(dictName string) {
 	}
 }
 
+// AllDicts returns all imported dictionaries
 func AllDicts() ([]Dict, error) {
 	rows, err := db.Query(
 		`SELECT id, title, format, revision
@@ -169,9 +164,10 @@ func AllDicts() ([]Dict, error) {
 	return result, nil
 }
 
+// DefineWord searchs definition by expression or reading
 func DefineWord(w string) ([]Term, error) {
 	rows, err := db.Query(
-		`SELECT expression, reading, glossaries, d.title
+		`SELECT expression, reading, definition_tags, rules, score, glossary, sequence, term_tags, d.title
 		 FROM terms t
 		 LEFT JOIN dicts d on t.dict_id = d.id
 		 WHERE expression = ? OR reading = ?`,
@@ -183,9 +179,11 @@ func DefineWord(w string) ([]Term, error) {
 	var result []Term
 	for rows.Next() {
 		var t Term
-		var glossaries []byte
-		rows.Scan(&t.Expression, &t.Reading, &glossaries, &t.Dict)
-		json.Unmarshal(glossaries, &t.Glossaries)
+		var _glossary []byte
+		rows.Scan(&t.Expression, &t.Reading, &t.DefinitionTags, &t.Rules, &t.Score, &_glossary, &t.Sequence, &t.TermTags, &t.Dict)
+		if err := json.Unmarshal(_glossary, &t.Glossary); err != nil {
+			return nil, err
+		}
 		result = append(result, t)
 	}
 	return result, nil
